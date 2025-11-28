@@ -1,0 +1,14 @@
+.cdx-excalidraw {
+  margin: 0;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid #e2e5ec;
+  background: #f9fafb;
+}
+
+.cdx-excalidraw__canvas-wrapper {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+

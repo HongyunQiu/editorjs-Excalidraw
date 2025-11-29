@@ -87,10 +87,15 @@ const ExcalidrawWrapper = (props: ExcalidrawWrapperProps) => {
 
     if (!initialScene) {
       // 空场景：提供一个最小合法结构（只包含 elements/files）
-      // appState 交给 Excalidraw 自己初始化，避免复用上一次的 UI 状态引发内部异常。
+      // 默认开启网格：通过在 appState 中设置一个正数的 gridSize，让 Excalidraw 从一开始就显示网格。
+      // 其余 appState 字段交给 Excalidraw 自己初始化，避免复用上一次的 UI 状态引发内部异常。
       return {
         elements: [],
-        appState: undefined,
+        appState: {
+          // Excalidraw 内部只要 gridSize 不是 null，就会认为「网格开启」；
+          // 数值代表网格间距，这里使用一个常见的 20 像素间距。
+          gridSize: 20,
+        },
         files: {},
       };
     }
@@ -126,6 +131,17 @@ const ExcalidrawWrapper = (props: ExcalidrawWrapperProps) => {
       const rawZoom = rawAppState.zoom;
       if (rawZoom && typeof rawZoom.value === 'number' && Number.isFinite(rawZoom.value)) {
         safeAppState.zoom = { value: rawZoom.value };
+      }
+
+      // 网格：只在数值合法时恢复，null 明确表示「关闭网格」
+      if (
+        typeof rawAppState.gridSize === 'number' &&
+        Number.isFinite(rawAppState.gridSize) &&
+        rawAppState.gridSize > 0
+      ) {
+        safeAppState.gridSize = rawAppState.gridSize;
+      } else if (rawAppState.gridSize === null) {
+        safeAppState.gridSize = null;
       }
 
       // 如需后续逐步恢复更多视图相关字段（例如 viewBackgroundColor），可在此按白名单追加。

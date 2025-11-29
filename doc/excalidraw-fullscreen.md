@@ -51,4 +51,18 @@
 - 若页面中还有其他高层级浮层（如全局对话框），请避免使用比 `2147483647` 更高的 `z-index`，以免遮挡全屏画布。
 - 若需要自定义按钮样式或文案，可在 `ExcalidrawWrapper` 中调整：「全屏」/「退出全屏」按钮的 `style` 或文本。
 
+### 关于 Excalidraw 内部 Help / 快捷键弹窗
+
+- Excalidraw 内部的 Help、快捷键说明等模态弹窗使用 `.excalidraw.excalidraw-modal-container` 作为容器，并通过 `z-index: var(--zIndex-modal)` 控制层级。
+- 在页面内全屏实现中，我们的全屏容器同样挂在 `document.body` 下，并使用了一个极大的 `z-index` 值覆盖 QNotes 顶部栏，这会导致默认的 Help 弹窗在全屏模式下被全屏容器挡住。
+- 为了确保这些模态弹窗在全屏模式下依然可见，需在 `src/index.css` 中增加以下覆盖样式：
+
+```css
+.excalidraw.excalidraw-modal-container {
+  z-index: 2147483647 !important;
+}
+```
+
+- 这样，Excalidraw 的模态弹窗会与全屏容器处于同一最高层级，并优先显示在最前面，无论当前是否为只读模式。
+
 

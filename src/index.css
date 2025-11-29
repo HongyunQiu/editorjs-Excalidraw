@@ -11,4 +11,11 @@
   overflow: hidden;
 }
 
+/* 确保 Excalidraw 自身的模态弹窗（如 Help 快捷键说明）
+   在页面内全屏模式下也能显示在最上层，不被 QNotes 顶栏或插件全屏容器遮挡。
+   这里覆盖其内部使用的 .excalidraw-modal-container 的 z-index。 */
+.excalidraw.excalidraw-modal-container {
+  z-index: 2147483647 !important;
+}
+
 

@@ -65,4 +65,24 @@
 
 - 这样，Excalidraw 的模态弹窗会与全屏容器处于同一最高层级，并优先显示在最前面，无论当前是否为只读模式。
 
+### 关于全屏切换时新绘制内容丢失的修复
+
+- 问题现象：在普通模式下绘制一些图形后，切换到全屏或从全屏切回时，部分“刚画的内容”会消失，看起来像是回退到了较早的场景。
+- 根本原因：
+  - 为实现页面内全屏，`ExcalidrawWrapper` 使用了 `createPortal`：
+    - 普通模式直接在 Block 内渲染；
+    - 全屏模式则把内容挂载到 `document.body`。
+  - 在两种模式之间切换时，内部的 `Excalidraw` 组件会被卸载并重新挂载；
+  - 如果重新挂载时仍然只使用初始的 `initialData`，则会丢失当前会话未持久化的最新绘制内容。
+- 解决方案（在 `ExcalidrawWrapper` 中完成）：
+  - 增加一个 `latestSceneRef`，用于缓存最近一次 `onChange` 回调提供的完整场景（`elements/appState/files`）：
+    - 在 `handleChange` 中，先把当前场景写入 `latestSceneRef.current`，再序列化为 JSON 传回 Editor.js：
+      - 这样，**每次用户绘制或修改后，内存中都有一份最新场景快照**。
+  - 在创建 `Excalidraw` 组件时，不再只使用最初的 `initialData`，而是优先使用 `latestSceneRef.current`：
+    - `initialData: latestSceneRef.current ?? initialData`；
+    - 当因全屏切换导致组件重新挂载时，会用最新快照初始化，从而保证内容连续性。
+- 修复效果：
+  - 在普通模式和全屏模式之间来回切换，不会再出现“新画内容在切换后丢失”的情况；
+  - 与 Editor.js 的持久化逻辑兼容，`save()` 仍然基于最新的 `scene` 字符串。
+
 

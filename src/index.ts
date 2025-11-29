@@ -4,6 +4,7 @@ import { make } from '@editorjs/dom';
 import type { API, BlockAPI, BlockTool, ToolConfig, SanitizerConfig } from '@editorjs/editorjs';
 import * as React from 'react';
 import { createRoot } from 'react-dom/client';
+import { createPortal } from 'react-dom';
 import { Excalidraw } from '@excalidraw/excalidraw';
 
 /**
@@ -69,6 +70,7 @@ interface ExcalidrawWrapperProps {
  */
 const ExcalidrawWrapper = (props: ExcalidrawWrapperProps) => {
   const { initialScene, height, onSceneChange, readOnly } = props;
+  const [isFullscreen, setIsFullscreen] = React.useState(false);
 
   const initialData: ExcalidrawInitialData = React.useMemo(() => {
     // 调试日志：查看加载时拿到的原始 scene 类型与前几百个字符
@@ -203,23 +205,90 @@ const ExcalidrawWrapper = (props: ExcalidrawWrapperProps) => {
     [onSceneChange],
   );
 
+  const toggleFullscreen = React.useCallback(() => {
+    setIsFullscreen(prev => !prev);
+  }, []);
+
   // 只读模式下，Excalidraw 本身不提供完全禁用编辑的官方属性，这里仍然渲染画布，
   // 但由上层在只读模式下避免调用 save/更改内容。
-  const wrapperStyle = {
+  const inlineWrapperStyle = {
     height,
     borderRadius: 8,
     overflow: 'hidden',
+    position: 'relative' as const,
   };
 
+  const fullscreenWrapperStyle = {
+    position: 'fixed' as const,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 2147483647, // 确保盖住几乎所有应用内元素（包括 QNotes 顶部栏）
+    backgroundColor: '#f9fafb',
+  };
+
+  const fullscreenButtonStyleBase = {
+    zIndex: 2147483647,
+    background: 'rgba(15, 23, 42, 0.9)',
+    color: '#ffffff',
+    border: 'none',
+    borderRadius: 4,
+    padding: '4px 10px',
+    cursor: 'pointer',
+    fontSize: 12,
+  };
+
+  const fullscreenButtonInlineStyle = {
+    ...fullscreenButtonStyleBase,
+    position: 'absolute' as const,
+    top: 8,
+    right: 8,
+  };
+
+  const fullscreenButtonFixedStyle = {
+    ...fullscreenButtonStyleBase,
+    position: 'fixed' as const,
+    top: 16,
+    right: 16,
+  };
+
+  const excalidrawElement = React.createElement(Excalidraw as unknown as any, {
+    key: 'excalidraw',
+    // initialData 只在首次挂载时生效
+    initialData,
+    onChange: handleChange,
+    viewModeEnabled: readOnly,
+  } as Record<string, unknown>);
+
+  const fullscreenToggleButton = React.createElement(
+    'button',
+    {
+      key: 'fullscreen-toggle',
+      type: 'button',
+      onClick: toggleFullscreen,
+      style: isFullscreen ? fullscreenButtonFixedStyle : fullscreenButtonInlineStyle,
+    },
+    isFullscreen ? '退出全屏' : '全屏',
+  );
+
+  // 全屏模式：使用 Portal 把画布挂到 document.body 之下，避免被 QNotes 的顶部栏遮挡
+  if (isFullscreen && typeof document !== 'undefined') {
+    return createPortal(
+      React.createElement(
+        'div',
+        { style: fullscreenWrapperStyle },
+        [fullscreenToggleButton, excalidrawElement],
+      ),
+      document.body,
+    );
+  }
+
+  // 普通模式：内联在 Editor.js Block 中渲染
   return React.createElement(
     'div',
-    { style: wrapperStyle },
-    React.createElement(Excalidraw as unknown as any, {
-      // initialData 只在首次挂载时生效
-      initialData,
-      onChange: handleChange,
-      viewModeEnabled: readOnly,
-    } as Record<string, unknown>),
+    { style: inlineWrapperStyle },
+    [fullscreenToggleButton, excalidrawElement],
   );
 };
 

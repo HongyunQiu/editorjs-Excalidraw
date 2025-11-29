@@ -186,6 +186,16 @@ const ExcalidrawWrapper = (props: ExcalidrawWrapperProps) => {
     return undefined;
   }, [initialScene]);
 
+  /**
+   * 由于在「页面内全屏」与普通模式之间切换时，我们会通过 Portal
+   * 导致内部的 Excalidraw 组件发生卸载 / 重新挂载。
+   *
+   * 如果仅依赖最初的 initialData，那么重新挂载时会丢失当前会话中新绘制的内容。
+   * 因此这里通过一个 ref 保存「最近一次 onChange 的完整场景」，在重新挂载时
+   * 作为 initialData 传给 Excalidraw，保证切换全屏前后的内容一致。
+   */
+  const latestSceneRef = React.useRef<ExcalidrawInitialData>(initialData);
+
   // 调试：观察组件挂载 / 卸载时机，确认 Editor.js 在 render(data) 时
   // 是否重新创建并渲染了 ExcalidrawWrapper
   React.useEffect(() => {
@@ -205,6 +215,13 @@ const ExcalidrawWrapper = (props: ExcalidrawWrapperProps) => {
 
   const handleChange = React.useCallback(
     (elements: readonly unknown[], appState: unknown, files: Record<string, unknown>) => {
+      // 先缓存当前场景到 ref，用于后续可能的重新挂载（例如全屏切换）
+      latestSceneRef.current = {
+        elements,
+        appState,
+        files,
+      };
+
       // 直接复用 Excalidraw 官方推荐的数据结构
       const scene = JSON.stringify(
         {
@@ -271,8 +288,10 @@ const ExcalidrawWrapper = (props: ExcalidrawWrapperProps) => {
 
   const excalidrawElement = React.createElement(Excalidraw as unknown as any, {
     key: 'excalidraw',
-    // initialData 只在首次挂载时生效
-    initialData,
+    // initialData 只在组件生命周期的首次挂载时生效；
+    // 但在我们通过 Portal 造成的卸载 / 重新挂载场景下，需要优先使用最近一次的场景快照，
+    // 避免在全屏切换时回到「旧的 initialScene」而丢失未保存的绘制内容。
+    initialData: latestSceneRef.current ?? initialData,
     onChange: handleChange,
     viewModeEnabled: readOnly,
   } as Record<string, unknown>);

@@ -1,36 +1,31 @@
 import './index.css';
 import { IconQuote } from '@codexteam/icons';
 import { make } from '@editorjs/dom';
-import type { API, BlockAPI, BlockTool, ToolConfig, SanitizerConfig } from '@editorjs/editorjs';
+import type { API, BlockAPI, BlockTool, SanitizerConfig, ToolConfig } from '@editorjs/editorjs';
 import * as React from 'react';
-import { createRoot } from 'react-dom/client';
 import { createPortal } from 'react-dom';
+import { createRoot } from 'react-dom/client';
 import { Excalidraw } from '@excalidraw/excalidraw';
 
-/**
- * Excalidraw 工具的配置
- */
 export interface ExcalidrawConfig extends ToolConfig {
-  /**
-   * 画布高度（像素），默认 480
-   */
   height?: number;
 }
 
-/**
- * Excalidraw 工具的数据结构
- *
- * scene 存放 Excalidraw 导出的 JSON 场景字符串。
- * link 预留字段，可用于记录自托管服务地址或共享链接。
- */
-export interface ExcalidrawData {
-  scene: string;
-  link?: string;
+export interface ExcalidrawAssetRef {
+  url: string;
+  name?: string;
+  size?: number;
+  mime?: string;
+  sha256?: string;
 }
 
-/**
- * 构造参数
- */
+export interface ExcalidrawData {
+  scene?: string;
+  link?: string;
+  asset?: ExcalidrawAssetRef;
+  sceneSha256?: string;
+}
+
 interface ExcalidrawParams {
   data: ExcalidrawData;
   config?: ExcalidrawConfig;
@@ -39,9 +34,6 @@ interface ExcalidrawParams {
   block: BlockAPI;
 }
 
-/**
- * CSS 类名集合
- */
 interface ExcalidrawCSS {
   baseClass: string;
   wrapper: string;
@@ -58,182 +50,175 @@ type ExcalidrawInitialData =
 
 interface ExcalidrawWrapperProps {
   initialScene: string | ExcalidrawInitialData | null | undefined;
+  assetUrl?: string;
   height: number;
   onSceneChange: (scene: string) => void;
   readOnly: boolean;
 }
 
-/**
- * 轻量包装一层 React 组件，用于在 Editor.js 工具中内嵌 Excalidraw。
- * 这里不直接依赖任何远端服务（不访问 Excalidraw.com），
- * 所有逻辑均基于本地引入的 @excalidraw/excalidraw 包。
- */
-const ExcalidrawWrapper = (props: ExcalidrawWrapperProps) => {
-  const { initialScene, height, onSceneChange, readOnly } = props;
-  const [isFullscreen, setIsFullscreen] = React.useState(false);
+const EXCALIDRAW_PIPELINE_NAME = 'excalidraw-assetize';
 
-  const initialData: ExcalidrawInitialData = React.useMemo(() => {
-    // 调试日志：查看加载时拿到的原始 scene 类型与前几百个字符
-    // 方便确认第二次「加载内容」时是否真的拿到了保存好的场景 JSON
-    // eslint-disable-next-line no-console
-    console.log('[ExcalidrawWrapper] compute initialData', {
-      typeofInitialScene: typeof initialScene,
-      hasInitialScene: !!initialScene,
-      preview:
-        typeof initialScene === 'string'
-          ? (initialScene as string).slice(0, 200)
-          : null,
-    });
-
-    if (!initialScene) {
-      // 空场景：提供一个最小合法结构（只包含 elements/files）
-      // 默认开启网格：通过在 appState 中设置一个正数的 gridSize，让 Excalidraw 从一开始就显示网格。
-      // 其余 appState 字段交给 Excalidraw 自己初始化，避免复用上一次的 UI 状态引发内部异常。
-      return {
-        elements: [],
-        appState: {
-          // Excalidraw 内部只要 gridSize 不是 null，就会认为「网格开启」；
-          // 数值代表网格间距，这里使用一个常见的 20 像素间距。
-          gridSize: 20,
-        },
-        files: {},
-      };
-    }
-
-    // 兼容两种形式：
-    // 1) scene 为已经解析好的对象（elements/appState/files）
-    // 2) scene 为 JSON 字符串
-    //
-    // 为了让「再次打开时」的体验更自然，这里会在安全范围内恢复一部分视图相关的 appState
-    //（例如：缩放、滚动位置、主题），但仍然避免复用所有 UI 状态。
-    const buildSafeAppState = (rawAppState: any): any | undefined => {
-      if (!rawAppState || typeof rawAppState !== 'object') {
-        return undefined;
-      }
-
-      const safeAppState: any = {};
-
-      // 主题：仅允许 dark / light，避免传入无效值
-      const rawTheme = rawAppState.theme;
-      if (rawTheme === 'dark' || rawTheme === 'light') {
-        safeAppState.theme = rawTheme;
-      }
-
-      // 视图位置：scrollX / scrollY
-      if (typeof rawAppState.scrollX === 'number' && Number.isFinite(rawAppState.scrollX)) {
-        safeAppState.scrollX = rawAppState.scrollX;
-      }
-      if (typeof rawAppState.scrollY === 'number' && Number.isFinite(rawAppState.scrollY)) {
-        safeAppState.scrollY = rawAppState.scrollY;
-      }
-
-      // 缩放：Excalidraw 使用 { value: number } 结构
-      const rawZoom = rawAppState.zoom;
-      if (rawZoom && typeof rawZoom.value === 'number' && Number.isFinite(rawZoom.value)) {
-        safeAppState.zoom = { value: rawZoom.value };
-      }
-
-      // 网格：只在数值合法时恢复，null 明确表示「关闭网格」
-      if (
-        typeof rawAppState.gridSize === 'number' &&
-        Number.isFinite(rawAppState.gridSize) &&
-        rawAppState.gridSize > 0
-      ) {
-        safeAppState.gridSize = rawAppState.gridSize;
-      } else if (rawAppState.gridSize === null) {
-        safeAppState.gridSize = null;
-      }
-
-      // 如需后续逐步恢复更多视图相关字段（例如 viewBackgroundColor），可在此按白名单追加。
-
-      return Object.keys(safeAppState).length > 0 ? safeAppState : undefined;
-    };
-
-    if (typeof initialScene === 'object') {
-      const obj = initialScene as ExcalidrawInitialData;
-      const rawAppState = (obj as any)?.appState;
-      const safeAppState = buildSafeAppState(rawAppState);
-
-      return {
-        // 仅保留元素数据 + 安全子集的 appState（缩放、位置、主题等），
-        // 避免复用完整 appState 触发 Excalidraw 内部 bug，但又能尽量还原视图状态。
-        elements: Array.isArray(obj?.elements) ? obj.elements : [],
-        appState: safeAppState,
-        files: obj?.files ?? {},
-      };
-    }
-
-    if (typeof initialScene === 'string') {
-      try {
-        const parsed = JSON.parse(initialScene);
-        // eslint-disable-next-line no-console
-        console.log('[ExcalidrawWrapper] parsed scene OK');
-        const rawAppState = (parsed as any)?.appState;
-        const safeAppState = buildSafeAppState(rawAppState);
-
-        return {
-          // 同上：恢复元素 + 安全子集的 appState，让再次打开时视图保持在用户离开时的位置
-          elements: Array.isArray(parsed?.elements) ? parsed.elements : [],
-          appState: safeAppState,
-          files: parsed?.files ?? {},
-        };
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.warn('[ExcalidrawBlock] 无法解析已保存的 scene JSON，将忽略：', e);
-      }
-    }
-
+function buildSafeAppState(rawAppState: any): any | undefined {
+  if (!rawAppState || typeof rawAppState !== 'object') {
     return undefined;
-  }, [initialScene]);
+  }
 
-  /**
-   * 由于在「页面内全屏」与普通模式之间切换时，我们会通过 Portal
-   * 导致内部的 Excalidraw 组件发生卸载 / 重新挂载。
-   *
-   * 如果仅依赖最初的 initialData，那么重新挂载时会丢失当前会话中新绘制的内容。
-   * 因此这里通过一个 ref 保存「最近一次 onChange 的完整场景」，在重新挂载时
-   * 作为 initialData 传给 Excalidraw，保证切换全屏前后的内容一致。
-   */
-  const latestSceneRef = React.useRef<ExcalidrawInitialData>(initialData);
+  const safeAppState: any = {};
 
-  // 调试：观察组件挂载 / 卸载时机，确认 Editor.js 在 render(data) 时
-  // 是否重新创建并渲染了 ExcalidrawWrapper
+  if (rawAppState.theme === 'dark' || rawAppState.theme === 'light') {
+    safeAppState.theme = rawAppState.theme;
+  }
+  if (typeof rawAppState.scrollX === 'number' && Number.isFinite(rawAppState.scrollX)) {
+    safeAppState.scrollX = rawAppState.scrollX;
+  }
+  if (typeof rawAppState.scrollY === 'number' && Number.isFinite(rawAppState.scrollY)) {
+    safeAppState.scrollY = rawAppState.scrollY;
+  }
+  if (rawAppState.zoom && typeof rawAppState.zoom.value === 'number' && Number.isFinite(rawAppState.zoom.value)) {
+    safeAppState.zoom = { value: rawAppState.zoom.value };
+  }
+  if (
+    typeof rawAppState.gridSize === 'number' &&
+    Number.isFinite(rawAppState.gridSize) &&
+    rawAppState.gridSize > 0
+  ) {
+    safeAppState.gridSize = rawAppState.gridSize;
+  } else if (rawAppState.gridSize === null) {
+    safeAppState.gridSize = null;
+  }
+
+  return Object.keys(safeAppState).length > 0 ? safeAppState : undefined;
+}
+
+function blankInitialData(): ExcalidrawInitialData {
+  return {
+    elements: [],
+    appState: {
+      gridSize: 20,
+    },
+    files: {},
+  };
+}
+
+function normalizeSceneForInitialData(initialScene: string | ExcalidrawInitialData | null | undefined): ExcalidrawInitialData {
+  if (!initialScene) {
+    return blankInitialData();
+  }
+
+  if (typeof initialScene === 'object') {
+    return {
+      elements: Array.isArray(initialScene.elements) ? initialScene.elements : [],
+      appState: buildSafeAppState((initialScene as any).appState),
+      files: initialScene.files ?? {},
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(initialScene);
+    return {
+      elements: Array.isArray(parsed?.elements) ? parsed.elements : [],
+      appState: buildSafeAppState(parsed?.appState),
+      files: parsed?.files ?? {},
+    };
+  } catch (error) {
+    console.warn('[ExcalidrawBlock] failed to parse scene JSON, fallback to blank scene:', error);
+    return blankInitialData();
+  }
+}
+
+const ExcalidrawWrapper = (props: ExcalidrawWrapperProps) => {
+  const { initialScene, assetUrl, height, onSceneChange, readOnly } = props;
+  const [isFullscreen, setIsFullscreen] = React.useState(false);
+  const [resolvedInitialScene, setResolvedInitialScene] = React.useState<string | ExcalidrawInitialData | null | undefined>(initialScene);
+  const [isAssetLoading, setIsAssetLoading] = React.useState(false);
+
   React.useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.log('[ExcalidrawWrapper] mount', {
-      typeofInitialScene: typeof initialScene,
-      hasInitialScene: !!initialScene,
-    });
+    let cancelled = false;
+
+    if (typeof initialScene === 'string' && initialScene.trim()) {
+      setResolvedInitialScene(initialScene);
+      setIsAssetLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (initialScene && typeof initialScene === 'object') {
+      setResolvedInitialScene(initialScene);
+      setIsAssetLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (!assetUrl) {
+      setResolvedInitialScene(initialScene);
+      setIsAssetLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setIsAssetLoading(true);
+    void fetch(assetUrl, { credentials: 'same-origin' })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`failed to fetch excalidraw asset: ${response.status}`);
+        }
+
+        return await response.text();
+      })
+      .then((sceneText) => {
+        if (!cancelled) {
+          setResolvedInitialScene(sceneText);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.warn('[ExcalidrawBlock] failed to load scene asset, fallback to blank scene:', error);
+          setResolvedInitialScene(undefined);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsAssetLoading(false);
+        }
+      });
 
     return () => {
-      // eslint-disable-next-line no-console
-      console.log('[ExcalidrawWrapper] unmount');
+      cancelled = true;
     };
-  }, [initialScene]);
+  }, [assetUrl, initialScene]);
 
+  const initialData: ExcalidrawInitialData = React.useMemo(
+    () => normalizeSceneForInitialData(resolvedInitialScene),
+    [resolvedInitialScene],
+  );
 
+  const latestSceneRef = React.useRef<ExcalidrawInitialData>(initialData);
+  React.useEffect(() => {
+    latestSceneRef.current = initialData;
+  }, [initialData]);
 
   const handleChange = React.useCallback(
     (elements: readonly unknown[], appState: unknown, files: Record<string, unknown>) => {
-      // 先缓存当前场景到 ref，用于后续可能的重新挂载（例如全屏切换）
       latestSceneRef.current = {
         elements,
         appState,
         files,
       };
 
-      // 直接复用 Excalidraw 官方推荐的数据结构
-      const scene = JSON.stringify(
-        {
-          elements,
-          appState,
-          files,
-        },
-        null,
-        2,
+      onSceneChange(
+        JSON.stringify(
+          {
+            elements,
+            appState,
+            files,
+          },
+          null,
+          2,
+        ),
       );
-
-      onSceneChange(scene);
     },
     [onSceneChange],
   );
@@ -242,8 +227,6 @@ const ExcalidrawWrapper = (props: ExcalidrawWrapperProps) => {
     setIsFullscreen(prev => !prev);
   }, []);
 
-  // 只读模式下，Excalidraw 本身不提供完全禁用编辑的官方属性，这里仍然渲染画布，
-  // 但由上层在只读模式下避免调用 save/更改内容。
   const inlineWrapperStyle = {
     height,
     borderRadius: 8,
@@ -257,7 +240,7 @@ const ExcalidrawWrapper = (props: ExcalidrawWrapperProps) => {
     left: 0,
     right: 0,
     bottom: 0,
-    zIndex: 2147483647, // 确保盖住几乎所有应用内元素（包括 QNotes 顶部栏）
+    zIndex: 2147483647,
     backgroundColor: '#f9fafb',
   };
 
@@ -288,9 +271,6 @@ const ExcalidrawWrapper = (props: ExcalidrawWrapperProps) => {
 
   const excalidrawElement = React.createElement(Excalidraw as unknown as any, {
     key: 'excalidraw',
-    // initialData 只在组件生命周期的首次挂载时生效；
-    // 但在我们通过 Portal 造成的卸载 / 重新挂载场景下，需要优先使用最近一次的场景快照，
-    // 避免在全屏切换时回到「旧的 initialScene」而丢失未保存的绘制内容。
     initialData: latestSceneRef.current ?? initialData,
     onChange: handleChange,
     viewModeEnabled: readOnly,
@@ -307,45 +287,248 @@ const ExcalidrawWrapper = (props: ExcalidrawWrapperProps) => {
     isFullscreen ? '退出全屏' : '全屏',
   );
 
-  // 全屏模式：使用 Portal 把画布挂到 document.body 之下，避免被 QNotes 的顶部栏遮挡
+  const loadingOverlay = isAssetLoading
+    ? React.createElement(
+        'div',
+        {
+          key: 'loading-overlay',
+          style: {
+            position: 'absolute' as const,
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(249, 250, 251, 0.85)',
+            color: '#475569',
+            fontSize: 14,
+            zIndex: 2,
+          },
+        },
+        'Loading drawing...',
+      )
+    : null;
+
   if (isFullscreen && typeof document !== 'undefined') {
     return createPortal(
       React.createElement(
         'div',
         { style: fullscreenWrapperStyle },
-        [fullscreenToggleButton, excalidrawElement],
+        [fullscreenToggleButton, loadingOverlay, excalidrawElement],
       ),
       document.body,
     );
   }
 
-  // 普通模式：内联在 Editor.js Block 中渲染
   return React.createElement(
     'div',
     { style: inlineWrapperStyle },
-    [fullscreenToggleButton, excalidrawElement],
+    [fullscreenToggleButton, loadingOverlay, excalidrawElement],
   );
 };
 
-/**
- * Editor.js Excalidraw BlockTool
- *
- * 直接在工具内部内嵌 Excalidraw 画布，不再跳转到 Excalidraw.com。
- * 如需自托管服务，只需在外部按官方文档部署 Excalidraw，并在解析 scene 时走自己的后端流程。
- */
+function getQNotesApp(): any | null {
+  if (typeof window === 'undefined') return null;
+  const w = window as any;
+  return w.QNotesApp && typeof w.QNotesApp === 'object' ? w.QNotesApp : null;
+}
+
+function stableStringify(value: any): string {
+  if (value == null) return 'null';
+  const t = typeof value;
+  if (t === 'string') return JSON.stringify(value);
+  if (t === 'number' || t === 'boolean') return String(value);
+  if (Array.isArray(value)) {
+    return `[${value.map(item => stableStringify(item)).join(',')}]`;
+  }
+  if (value && typeof value === 'object' && value.constructor === Object) {
+    const keys = Object.keys(value).sort();
+    return `{${keys.map(key => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch (_) {
+    return String(value);
+  }
+}
+
+function normalizeSceneObject(sceneObj: any): Record<string, unknown> {
+  const src = sceneObj && typeof sceneObj === 'object' ? sceneObj : {};
+  return {
+    type: src.type != null ? src.type : 'excalidraw',
+    version: src.version != null ? src.version : 2,
+    source: src.source != null ? src.source : 'qnotes',
+    elements: Array.isArray(src.elements) ? src.elements : [],
+    appState: src.appState && typeof src.appState === 'object' ? src.appState : {},
+    files: src.files && typeof src.files === 'object' ? src.files : {},
+  };
+}
+
+function buildContentSignatureScene(sceneObj: any): Record<string, unknown> {
+  const normalized = normalizeSceneObject(sceneObj);
+  return {
+    type: normalized.type,
+    version: normalized.version,
+    source: normalized.source,
+    elements: normalized.elements,
+    files: normalized.files,
+  };
+}
+
+async function sha256Hex(text: string): Promise<string> {
+  const bytes = new TextEncoder().encode(text);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function findPreviousBlockByIdOrIndex(app: any, currentBlock: any, index: number): any | null {
+  const prevBlocks = app && app.state && app.state.lastRenderedEditorData && Array.isArray(app.state.lastRenderedEditorData.blocks)
+    ? app.state.lastRenderedEditorData.blocks
+    : [];
+  const currentId = currentBlock && currentBlock.id ? String(currentBlock.id) : '';
+
+  if (currentId) {
+    const matched = prevBlocks.find((block: any) => block && String(block.id || '') === currentId);
+    if (matched) return matched;
+  }
+
+  return prevBlocks[index] || null;
+}
+
+async function assetizeExcalidrawBlock(app: any, block: any, index: number): Promise<any> {
+  if (!block || block.type !== 'excalidraw') {
+    return block;
+  }
+
+  const fn = app && app.fn ? app.fn : null;
+  if (!fn || typeof fn.uploadAttachmentBlobAsQNotes !== 'function') {
+    return block;
+  }
+
+  const data = block.data && typeof block.data === 'object' ? { ...block.data } : {};
+  const previousBlock = findPreviousBlockByIdOrIndex(app, block, index);
+  const previousData = previousBlock && previousBlock.data && typeof previousBlock.data === 'object'
+    ? previousBlock.data
+    : {};
+  const sceneText = typeof data.scene === 'string' ? data.scene.trim() : '';
+  const currentAsset = data.asset && typeof data.asset === 'object' ? data.asset : null;
+  const previousAsset = previousData.asset && typeof previousData.asset === 'object' ? previousData.asset : null;
+  const existingAsset = currentAsset || previousAsset;
+  const existingSha = typeof data.sceneSha256 === 'string' && data.sceneSha256
+    ? data.sceneSha256
+    : (existingAsset && typeof existingAsset.sha256 === 'string' ? existingAsset.sha256 : '');
+
+  if (!sceneText) {
+    if (existingAsset && typeof existingAsset.url === 'string' && existingAsset.url) {
+      return {
+        ...block,
+        data: {
+          ...data,
+          scene: '',
+          sceneSha256: existingSha || '',
+          asset: existingAsset,
+        },
+      };
+    }
+    return block;
+  }
+
+  let parsedScene: any;
+  try {
+    parsedScene = JSON.parse(sceneText);
+  } catch (_) {
+    return block;
+  }
+
+  const normalizedScene = normalizeSceneObject(parsedScene);
+  const sceneFileText = `${stableStringify(normalizedScene)}\n`;
+  const sceneContentSignature = stableStringify(buildContentSignatureScene(normalizedScene));
+  const sha256 = await sha256Hex(sceneContentSignature);
+
+  if (existingAsset && typeof existingAsset.url === 'string' && existingAsset.url && existingSha === sha256) {
+    return {
+      ...block,
+      data: {
+        ...data,
+        scene: '',
+        sceneSha256: sha256,
+        asset: existingAsset,
+      },
+    };
+  }
+
+  const filename = `excalidraw-${sha256}.excalidraw.json`;
+  const blob = new Blob([sceneFileText], { type: 'application/json' });
+  const uploadResult = await fn.uploadAttachmentBlobAsQNotes(blob, filename);
+  if (!uploadResult || !uploadResult.file || !uploadResult.file.url) {
+    throw new Error('Failed to upload excalidraw scene asset');
+  }
+
+  return {
+    ...block,
+    data: {
+      ...data,
+      scene: '',
+      sceneSha256: sha256,
+      asset: {
+        url: String(uploadResult.file.url),
+        name: typeof uploadResult.file.name === 'string' ? uploadResult.file.name : filename,
+        size: Number.isFinite(Number(uploadResult.file.size)) ? Number(uploadResult.file.size) : sceneFileText.length,
+        mime: 'application/json',
+        sha256,
+      },
+    },
+  };
+}
+
+function ensureExcalidrawCommitPipelineRegistered(): void {
+  const app = getQNotesApp();
+  if (!app || !app.fn || typeof app.fn.registerBeforeCommitPipeline !== 'function') {
+    return;
+  }
+
+  if (app.__excalidrawCommitPipelineRegistered) {
+    return;
+  }
+
+  app.fn.registerBeforeCommitPipeline(
+    EXCALIDRAW_PIPELINE_NAME,
+    async (data: any) => {
+      const editorData = data && typeof data === 'object' ? data : {};
+      const blocks = Array.isArray(editorData.blocks) ? editorData.blocks : [];
+      if (!blocks.length) {
+        return editorData;
+      }
+
+      const nextBlocks = [];
+      for (let index = 0; index < blocks.length; index += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        nextBlocks.push(await assetizeExcalidrawBlock(app, blocks[index], index));
+      }
+
+      return {
+        ...editorData,
+        blocks: nextBlocks,
+      };
+    },
+  );
+
+  app.__excalidrawCommitPipelineRegistered = true;
+}
+
 export default class ExcalidrawBlock implements BlockTool {
   private api: API;
   private readOnly: boolean;
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private block: BlockAPI;
-
   private data: ExcalidrawData;
   private css: ExcalidrawCSS;
   private height: number;
-
   private reactRoot: any;
 
   constructor({ data, config, api, readOnly, block }: ExcalidrawParams) {
+    ensureExcalidrawCommitPipelineRegistered();
+
     this.api = api;
     this.readOnly = readOnly;
     this.block = block;
@@ -353,25 +536,24 @@ export default class ExcalidrawBlock implements BlockTool {
     const rawScene = data?.scene;
     let normalizedScene = '';
 
-    // 兼容外部在持久化逻辑中将 scene 解析为对象的情况
     if (typeof rawScene === 'string') {
       normalizedScene = rawScene;
     } else if (rawScene && typeof rawScene === 'object') {
       try {
         normalizedScene = JSON.stringify(rawScene);
-      } catch (e) {
-        console.warn('[ExcalidrawBlock] 无法序列化传入的 scene 对象，将使用空场景：', e);
+      } catch (error) {
+        console.warn('[ExcalidrawBlock] failed to serialize incoming scene object, fallback to blank scene:', error);
       }
     }
 
     this.data = {
       scene: normalizedScene,
       link: data?.link ?? '',
+      asset: data?.asset,
+      sceneSha256: data?.sceneSha256,
     };
 
-    // 默认高度由 480 提升到 960，如果外部未配置 height，则使用更高的画布视图
     this.height = Number.isFinite(config?.height as number) ? (config!.height as number) : 960;
-
     this.css = {
       baseClass: this.api.styles.block,
       wrapper: 'cdx-excalidraw',
@@ -401,7 +583,6 @@ export default class ExcalidrawBlock implements BlockTool {
   public render(): HTMLElement {
     const container = make('div', [this.css.baseClass, this.css.wrapper]);
     const canvasHost = make('div', [this.css.canvasWrapper]);
-
     container.appendChild(canvasHost);
 
     const onSceneChange = (scene: string) => {
@@ -412,6 +593,7 @@ export default class ExcalidrawBlock implements BlockTool {
     this.reactRoot.render(
       React.createElement(ExcalidrawWrapper, {
         initialScene: this.data.scene,
+        assetUrl: this.data.asset?.url,
         height: this.height,
         onSceneChange,
         readOnly: this.readOnly,
@@ -422,10 +604,11 @@ export default class ExcalidrawBlock implements BlockTool {
   }
 
   public save(): ExcalidrawData {
-    // 场景数据由 onSceneChange 持续更新，直接返回内部缓存即可
     return {
       scene: this.data.scene ?? '',
       link: this.data.link,
+      asset: this.data.asset,
+      sceneSha256: this.data.sceneSha256,
     };
   }
 
@@ -437,6 +620,8 @@ export default class ExcalidrawBlock implements BlockTool {
       link: {
         br: true,
       },
+      asset: false,
+      sceneSha256: false,
     } as unknown as SanitizerConfig;
   }
 
@@ -445,7 +630,6 @@ export default class ExcalidrawBlock implements BlockTool {
       return false;
     }
 
-    // 字符串和对象两种形式都认为是“有数据”，具体解析错误在渲染阶段兜底
     if (typeof (data as any).scene === 'string') {
       return true;
     }
@@ -454,13 +638,13 @@ export default class ExcalidrawBlock implements BlockTool {
       return true;
     }
 
+    if ((data as any).asset && typeof (data as any).asset.url === 'string') {
+      return true;
+    }
+
     return false;
   }
 
-  /**
-   * Editor.js 在销毁 Block 或重新渲染数据时会调用 destroy，
-   * 这里负责卸载 React Root，避免重复挂载或内存泄漏。
-   */
   public destroy(): void {
     if (this.reactRoot && typeof this.reactRoot.unmount === 'function') {
       this.reactRoot.unmount();
@@ -469,4 +653,3 @@ export default class ExcalidrawBlock implements BlockTool {
     this.reactRoot = null;
   }
 }
-

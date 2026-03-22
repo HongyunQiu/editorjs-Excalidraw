@@ -1,26 +1,20 @@
-import { API, BlockAPI, BlockTool, ToolConfig, SanitizerConfig } from '@editorjs/editorjs';
-/**
- * Excalidraw 工具的配置
- */
+import { API, BlockAPI, BlockTool, SanitizerConfig, ToolConfig } from '@editorjs/editorjs';
 export interface ExcalidrawConfig extends ToolConfig {
-    /**
-     * 画布高度（像素），默认 480
-     */
     height?: number;
 }
-/**
- * Excalidraw 工具的数据结构
- *
- * scene 存放 Excalidraw 导出的 JSON 场景字符串。
- * link 预留字段，可用于记录自托管服务地址或共享链接。
- */
-export interface ExcalidrawData {
-    scene: string;
-    link?: string;
+export interface ExcalidrawAssetRef {
+    url: string;
+    name?: string;
+    size?: number;
+    mime?: string;
+    sha256?: string;
 }
-/**
- * 构造参数
- */
+export interface ExcalidrawData {
+    scene?: string;
+    link?: string;
+    asset?: ExcalidrawAssetRef;
+    sceneSha256?: string;
+}
 interface ExcalidrawParams {
     data: ExcalidrawData;
     config?: ExcalidrawConfig;
@@ -28,12 +22,6 @@ interface ExcalidrawParams {
     readOnly: boolean;
     block: BlockAPI;
 }
-/**
- * Editor.js Excalidraw BlockTool
- *
- * 直接在工具内部内嵌 Excalidraw 画布，不再跳转到 Excalidraw.com。
- * 如需自托管服务，只需在外部按官方文档部署 Excalidraw，并在解析 scene 时走自己的后端流程。
- */
 export default class ExcalidrawBlock implements BlockTool {
     private api;
     private readOnly;
@@ -54,10 +42,6 @@ export default class ExcalidrawBlock implements BlockTool {
     save(): ExcalidrawData;
     static get sanitize(): SanitizerConfig;
     validate(data: ExcalidrawData): boolean;
-    /**
-     * Editor.js 在销毁 Block 或重新渲染数据时会调用 destroy，
-     * 这里负责卸载 React Root，避免重复挂载或内存泄漏。
-     */
     destroy(): void;
 }
 export {};

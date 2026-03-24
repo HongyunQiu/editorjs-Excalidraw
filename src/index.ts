@@ -57,6 +57,7 @@ interface ExcalidrawWrapperProps {
 }
 
 const EXCALIDRAW_PIPELINE_NAME = 'excalidraw-assetize';
+const EXCALIDRAW_TOOL_VERSION = '20260324-234800';
 
 function buildSafeAppState(rawAppState: any): any | undefined {
   if (!rawAppState || typeof rawAppState !== 'object') {
@@ -652,4 +653,10 @@ export default class ExcalidrawBlock implements BlockTool {
 
     this.reactRoot = null;
   }
+}
+
+if (typeof window !== 'undefined') {
+  try {
+    console.info('[QNotes][ExcalidrawTool] loaded version', EXCALIDRAW_TOOL_VERSION);
+  } catch (_) {}
 }

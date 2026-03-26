@@ -2,8 +2,9 @@
   margin: 0;
   padding: 0;
   border-radius: 8px;
-  border: 1px solid #e2e5ec;
-  background: #f9fafb;
+  border: 1px solid var(--border, #e2e5ec);
+  background: var(--surface-muted, #f9fafb);
+  color: var(--text, #0f172a);
 }
 
 .cdx-excalidraw__canvas-wrapper {
@@ -11,11 +12,15 @@
   overflow: hidden;
 }
 
-/* 确保 Excalidraw 自身的模态弹窗（如 Help 快捷键说明）
-   在页面内全屏模式下也能显示在最上层，不被 QNotes 顶栏或插件全屏容器遮挡。
-   这里覆盖其内部使用的 .excalidraw-modal-container 的 z-index。 */
+/* Keep Excalidraw modals above the QNotes header and fullscreen wrapper. */
 .excalidraw.excalidraw-modal-container {
   z-index: 2147483647 !important;
 }
 
-
+@media (prefers-color-scheme: dark) {
+  .cdx-excalidraw {
+    border-color: var(--border, #334155);
+    background: var(--surface, #0f141c);
+    color: var(--text, #e5edf8);
+  }
+}

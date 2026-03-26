@@ -58,6 +58,7 @@ interface ExcalidrawWrapperProps {
 
 const EXCALIDRAW_PIPELINE_NAME = 'excalidraw-assetize';
 const EXCALIDRAW_TOOL_VERSION = '20260324-234800';
+type PreferredTheme = 'light' | 'dark';
 
 function buildSafeAppState(rawAppState: any): any | undefined {
   if (!rawAppState || typeof rawAppState !== 'object') {
@@ -127,11 +128,59 @@ function normalizeSceneForInitialData(initialScene: string | ExcalidrawInitialDa
   }
 }
 
+function getPreferredTheme(): PreferredTheme {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return 'light';
+  }
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+function withPreferredTheme(
+  initialData: ExcalidrawInitialData,
+  preferredTheme: PreferredTheme,
+): ExcalidrawInitialData {
+  const appState = initialData?.appState && typeof initialData.appState === 'object'
+    ? { ...(initialData.appState as Record<string, unknown>) }
+    : {};
+
+  if (appState.theme !== 'light' && appState.theme !== 'dark') {
+    appState.theme = preferredTheme;
+  }
+
+  return {
+    elements: Array.isArray(initialData?.elements) ? initialData.elements : [],
+    appState,
+    files: initialData?.files ?? {},
+  };
+}
+
 const ExcalidrawWrapper = (props: ExcalidrawWrapperProps) => {
   const { initialScene, assetUrl, height, onSceneChange, readOnly } = props;
   const [isFullscreen, setIsFullscreen] = React.useState(false);
   const [resolvedInitialScene, setResolvedInitialScene] = React.useState<string | ExcalidrawInitialData | null | undefined>(initialScene);
   const [isAssetLoading, setIsAssetLoading] = React.useState(false);
+  const [preferredTheme, setPreferredTheme] = React.useState<PreferredTheme>(() => getPreferredTheme());
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const onThemeChange = (event: MediaQueryListEvent | MediaQueryList) => {
+      setPreferredTheme(event.matches ? 'dark' : 'light');
+    };
+
+    onThemeChange(mediaQuery);
+
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', onThemeChange);
+      return () => mediaQuery.removeEventListener('change', onThemeChange);
+    }
+
+    mediaQuery.addListener(onThemeChange);
+    return () => mediaQuery.removeListener(onThemeChange);
+  }, []);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -195,11 +244,26 @@ const ExcalidrawWrapper = (props: ExcalidrawWrapperProps) => {
     () => normalizeSceneForInitialData(resolvedInitialScene),
     [resolvedInitialScene],
   );
+  const themedInitialData: ExcalidrawInitialData = React.useMemo(
+    () => withPreferredTheme(initialData, preferredTheme),
+    [initialData, preferredTheme],
+  );
+  const [sceneMountVersion, setSceneMountVersion] = React.useState(0);
+  const previousResolvedSceneRef = React.useRef<string | ExcalidrawInitialData | null | undefined>(resolvedInitialScene);
 
-  const latestSceneRef = React.useRef<ExcalidrawInitialData>(initialData);
+  const latestSceneRef = React.useRef<ExcalidrawInitialData>(themedInitialData);
   React.useEffect(() => {
-    latestSceneRef.current = initialData;
-  }, [initialData]);
+    latestSceneRef.current = themedInitialData;
+  }, [themedInitialData]);
+
+  React.useEffect(() => {
+    if (previousResolvedSceneRef.current === resolvedInitialScene) {
+      return;
+    }
+
+    previousResolvedSceneRef.current = resolvedInitialScene;
+    setSceneMountVersion(prev => prev + 1);
+  }, [resolvedInitialScene]);
 
   const handleChange = React.useCallback(
     (elements: readonly unknown[], appState: unknown, files: Record<string, unknown>) => {
@@ -235,6 +299,27 @@ const ExcalidrawWrapper = (props: ExcalidrawWrapperProps) => {
     position: 'relative' as const,
   };
 
+  const isDarkTheme = preferredTheme === 'dark';
+  const chromePalette = isDarkTheme
+    ? {
+        fullscreenBg: '#0f141c',
+        overlayBg: 'rgba(8, 12, 18, 0.72)',
+        overlayText: '#d7dee9',
+        buttonBg: 'rgba(17, 24, 39, 0.86)',
+        buttonText: '#f3f6fb',
+        buttonBorder: '1px solid rgba(148, 163, 184, 0.34)',
+        buttonShadow: '0 10px 28px rgba(0, 0, 0, 0.28)',
+      }
+    : {
+        fullscreenBg: '#f3f6fb',
+        overlayBg: 'rgba(249, 250, 251, 0.84)',
+        overlayText: '#475569',
+        buttonBg: 'rgba(15, 23, 42, 0.9)',
+        buttonText: '#ffffff',
+        buttonBorder: '1px solid rgba(255, 255, 255, 0.14)',
+        buttonShadow: '0 10px 28px rgba(15, 23, 42, 0.18)',
+      };
+
   const fullscreenWrapperStyle = {
     position: 'fixed' as const,
     top: 0,
@@ -242,18 +327,21 @@ const ExcalidrawWrapper = (props: ExcalidrawWrapperProps) => {
     right: 0,
     bottom: 0,
     zIndex: 2147483647,
-    backgroundColor: '#f9fafb',
+    backgroundColor: chromePalette.fullscreenBg,
   };
 
   const fullscreenButtonStyleBase = {
     zIndex: 2147483647,
-    background: 'rgba(15, 23, 42, 0.9)',
-    color: '#ffffff',
-    border: 'none',
-    borderRadius: 4,
-    padding: '4px 10px',
+    background: chromePalette.buttonBg,
+    color: chromePalette.buttonText,
+    border: chromePalette.buttonBorder,
+    borderRadius: 999,
+    padding: '7px 14px',
     cursor: 'pointer',
     fontSize: 12,
+    boxShadow: chromePalette.buttonShadow,
+    backdropFilter: 'blur(8px)',
+    fontWeight: 600,
   };
 
   const fullscreenButtonInlineStyle = {
@@ -271,7 +359,7 @@ const ExcalidrawWrapper = (props: ExcalidrawWrapperProps) => {
   };
 
   const excalidrawElement = React.createElement(Excalidraw as unknown as any, {
-    key: 'excalidraw',
+    key: `excalidraw-${sceneMountVersion}`,
     initialData: latestSceneRef.current ?? initialData,
     onChange: handleChange,
     viewModeEnabled: readOnly,
@@ -299,8 +387,8 @@ const ExcalidrawWrapper = (props: ExcalidrawWrapperProps) => {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: 'rgba(249, 250, 251, 0.85)',
-            color: '#475569',
+            background: chromePalette.overlayBg,
+            color: chromePalette.overlayText,
             fontSize: 14,
             zIndex: 2,
           },

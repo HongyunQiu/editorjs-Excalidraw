@@ -19,11 +19,42 @@ export interface ExcalidrawAssetRef {
   sha256?: string;
 }
 
+export interface ExcalidrawSceneMeta {
+  type?: string;
+  version?: number;
+  source?: string;
+}
+
+export interface ExcalidrawEditorDefaultStyle {
+  strokeColor?: string;
+  backgroundColor?: string;
+  fillStyle?: string;
+  strokeWidth?: number;
+  strokeStyle?: string;
+  roughness?: number;
+  opacity?: number;
+  fontFamily?: number;
+  fontSize?: number;
+  textAlign?: string;
+  startArrowhead?: string | null;
+  endArrowhead?: string | null;
+  roundness?: unknown;
+}
+
+export interface ExcalidrawEditorPrefs {
+  gridSize?: number | null;
+  viewBackgroundColor?: string;
+  objectsSnapModeEnabled?: boolean;
+  defaultStyle?: ExcalidrawEditorDefaultStyle;
+}
+
 export interface ExcalidrawData {
   scene?: string;
   link?: string;
   asset?: ExcalidrawAssetRef;
   sceneSha256?: string;
+  sceneMeta?: ExcalidrawSceneMeta;
+  editorPrefs?: ExcalidrawEditorPrefs;
 }
 
 interface ExcalidrawParams {
@@ -51,45 +82,188 @@ type ExcalidrawInitialData =
 interface ExcalidrawWrapperProps {
   initialScene: string | ExcalidrawInitialData | null | undefined;
   assetUrl?: string;
+  editorPrefs?: ExcalidrawEditorPrefs;
+  sceneMeta?: ExcalidrawSceneMeta;
   height: number;
   onSceneChange: (scene: string) => void;
+  onSceneResolved?: (scene: string) => void;
   readOnly: boolean;
 }
 
 const EXCALIDRAW_PIPELINE_NAME = 'excalidraw-assetize';
-const EXCALIDRAW_TOOL_VERSION = '20260324-234800';
+const EXCALIDRAW_TOOL_VERSION = '20260327-172800';
 type PreferredTheme = 'light' | 'dark';
 
-function buildSafeAppState(rawAppState: any): any | undefined {
-  if (!rawAppState || typeof rawAppState !== 'object') {
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function extractSceneMeta(rawScene: any, fallback?: ExcalidrawSceneMeta): ExcalidrawSceneMeta {
+  const scene = rawScene && typeof rawScene === 'object' ? rawScene : {};
+  const meta: ExcalidrawSceneMeta = {
+    type: isNonEmptyString(scene.type) ? scene.type : (isNonEmptyString(fallback?.type) ? fallback?.type : 'excalidraw'),
+    version: isFiniteNumber(scene.version) ? scene.version : (isFiniteNumber(fallback?.version) ? fallback?.version : 2),
+    source: isNonEmptyString(scene.source) ? scene.source : (isNonEmptyString(fallback?.source) ? fallback?.source : 'qnotes'),
+  };
+  return meta;
+}
+
+function extractEditorPrefs(rawAppState: any, fallback?: ExcalidrawEditorPrefs): ExcalidrawEditorPrefs | undefined {
+  if ((!rawAppState || typeof rawAppState !== 'object') && (!fallback || typeof fallback !== 'object')) {
     return undefined;
   }
 
-  const safeAppState: any = {};
+  const appState = rawAppState && typeof rawAppState === 'object' ? rawAppState : {};
+  const defaultStyle: ExcalidrawEditorDefaultStyle = {};
+  const fallbackDefaultStyle = fallback?.defaultStyle && typeof fallback.defaultStyle === 'object'
+    ? fallback.defaultStyle
+    : undefined;
 
-  if (rawAppState.theme === 'dark' || rawAppState.theme === 'light') {
-    safeAppState.theme = rawAppState.theme;
+  const copyString = (sourceValue: unknown, fallbackValue?: string): string | undefined => {
+    if (isNonEmptyString(sourceValue)) return sourceValue;
+    if (isNonEmptyString(fallbackValue)) return fallbackValue;
+    return undefined;
+  };
+  const copyNumber = (sourceValue: unknown, fallbackValue?: number): number | undefined => {
+    if (isFiniteNumber(sourceValue)) return sourceValue;
+    if (isFiniteNumber(fallbackValue)) return fallbackValue;
+    return undefined;
+  };
+
+  const strokeColor = copyString(appState.currentItemStrokeColor, fallbackDefaultStyle?.strokeColor);
+  if (strokeColor) {
+    defaultStyle.strokeColor = strokeColor;
   }
-  if (typeof rawAppState.scrollX === 'number' && Number.isFinite(rawAppState.scrollX)) {
-    safeAppState.scrollX = rawAppState.scrollX;
+  const backgroundColor = copyString(appState.currentItemBackgroundColor, fallbackDefaultStyle?.backgroundColor);
+  if (backgroundColor) {
+    defaultStyle.backgroundColor = backgroundColor;
   }
-  if (typeof rawAppState.scrollY === 'number' && Number.isFinite(rawAppState.scrollY)) {
-    safeAppState.scrollY = rawAppState.scrollY;
+  const fillStyle = copyString(appState.currentItemFillStyle, fallbackDefaultStyle?.fillStyle);
+  if (fillStyle) {
+    defaultStyle.fillStyle = fillStyle;
   }
-  if (rawAppState.zoom && typeof rawAppState.zoom.value === 'number' && Number.isFinite(rawAppState.zoom.value)) {
-    safeAppState.zoom = { value: rawAppState.zoom.value };
+  const strokeWidth = copyNumber(appState.currentItemStrokeWidth, fallbackDefaultStyle?.strokeWidth);
+  if (strokeWidth !== undefined) {
+    defaultStyle.strokeWidth = strokeWidth;
   }
-  if (
-    typeof rawAppState.gridSize === 'number' &&
-    Number.isFinite(rawAppState.gridSize) &&
-    rawAppState.gridSize > 0
-  ) {
-    safeAppState.gridSize = rawAppState.gridSize;
-  } else if (rawAppState.gridSize === null) {
-    safeAppState.gridSize = null;
+  const strokeStyle = copyString(appState.currentItemStrokeStyle, fallbackDefaultStyle?.strokeStyle);
+  if (strokeStyle) {
+    defaultStyle.strokeStyle = strokeStyle;
+  }
+  const roughness = copyNumber(appState.currentItemRoughness, fallbackDefaultStyle?.roughness);
+  if (roughness !== undefined) {
+    defaultStyle.roughness = roughness;
+  }
+  const opacity = copyNumber(appState.currentItemOpacity, fallbackDefaultStyle?.opacity);
+  if (opacity !== undefined) {
+    defaultStyle.opacity = opacity;
+  }
+  const fontFamily = copyNumber(appState.currentItemFontFamily, fallbackDefaultStyle?.fontFamily);
+  if (fontFamily !== undefined) {
+    defaultStyle.fontFamily = fontFamily;
+  }
+  const fontSize = copyNumber(appState.currentItemFontSize, fallbackDefaultStyle?.fontSize);
+  if (fontSize !== undefined) {
+    defaultStyle.fontSize = fontSize;
+  }
+  const textAlign = copyString(appState.currentItemTextAlign, fallbackDefaultStyle?.textAlign);
+  if (textAlign) {
+    defaultStyle.textAlign = textAlign;
+  }
+  if (appState.currentItemStartArrowhead === null || fallbackDefaultStyle?.startArrowhead === null) {
+    defaultStyle.startArrowhead = appState.currentItemStartArrowhead === null ? null : fallbackDefaultStyle?.startArrowhead ?? null;
+  } else {
+    const startArrowhead = copyString(appState.currentItemStartArrowhead, fallbackDefaultStyle?.startArrowhead ?? undefined);
+    if (startArrowhead) {
+      defaultStyle.startArrowhead = startArrowhead;
+    }
+  }
+  if (appState.currentItemEndArrowhead === null || fallbackDefaultStyle?.endArrowhead === null) {
+    defaultStyle.endArrowhead = appState.currentItemEndArrowhead === null ? null : fallbackDefaultStyle?.endArrowhead ?? null;
+  } else {
+    const endArrowhead = copyString(appState.currentItemEndArrowhead, fallbackDefaultStyle?.endArrowhead ?? undefined);
+    if (endArrowhead) {
+      defaultStyle.endArrowhead = endArrowhead;
+    }
+  }
+  if (appState.currentItemRoundness != null) {
+    defaultStyle.roundness = appState.currentItemRoundness;
+  } else if (fallbackDefaultStyle?.roundness != null) {
+    defaultStyle.roundness = fallbackDefaultStyle.roundness;
   }
 
-  return Object.keys(safeAppState).length > 0 ? safeAppState : undefined;
+  const prefs: ExcalidrawEditorPrefs = {};
+
+  if (isFiniteNumber(appState.gridSize) && appState.gridSize > 0) {
+    prefs.gridSize = appState.gridSize;
+  } else if (appState.gridSize === null) {
+    prefs.gridSize = null;
+  } else if (fallback && 'gridSize' in fallback) {
+    prefs.gridSize = fallback.gridSize;
+  }
+
+  const viewBackgroundColor = copyString(appState.viewBackgroundColor, fallback?.viewBackgroundColor);
+  if (viewBackgroundColor) {
+    prefs.viewBackgroundColor = viewBackgroundColor;
+  }
+
+  if (typeof appState.objectsSnapModeEnabled === 'boolean') {
+    prefs.objectsSnapModeEnabled = appState.objectsSnapModeEnabled;
+  } else if (typeof fallback?.objectsSnapModeEnabled === 'boolean') {
+    prefs.objectsSnapModeEnabled = fallback.objectsSnapModeEnabled;
+  }
+
+  if (Object.keys(defaultStyle).length > 0) {
+    prefs.defaultStyle = defaultStyle;
+  }
+
+  return Object.keys(prefs).length > 0 ? prefs : undefined;
+}
+
+function buildInitialAppState(
+  editorPrefs?: ExcalidrawEditorPrefs,
+  preferredTheme?: PreferredTheme,
+  legacyAppState?: any,
+): Record<string, unknown> | undefined {
+  const safePrefs = extractEditorPrefs(legacyAppState, editorPrefs);
+  const appState: Record<string, unknown> = {};
+
+  if (preferredTheme === 'light' || preferredTheme === 'dark') {
+    appState.theme = preferredTheme;
+  }
+
+  if (safePrefs && 'gridSize' in safePrefs) {
+    appState.gridSize = safePrefs.gridSize ?? null;
+  }
+  if (safePrefs?.viewBackgroundColor) {
+    appState.viewBackgroundColor = safePrefs.viewBackgroundColor;
+  }
+  if (typeof safePrefs?.objectsSnapModeEnabled === 'boolean') {
+    appState.objectsSnapModeEnabled = safePrefs.objectsSnapModeEnabled;
+  }
+
+  const defaultStyle = safePrefs?.defaultStyle;
+  if (defaultStyle) {
+    if (defaultStyle.strokeColor) appState.currentItemStrokeColor = defaultStyle.strokeColor;
+    if (defaultStyle.backgroundColor) appState.currentItemBackgroundColor = defaultStyle.backgroundColor;
+    if (defaultStyle.fillStyle) appState.currentItemFillStyle = defaultStyle.fillStyle;
+    if (defaultStyle.strokeWidth !== undefined) appState.currentItemStrokeWidth = defaultStyle.strokeWidth;
+    if (defaultStyle.strokeStyle) appState.currentItemStrokeStyle = defaultStyle.strokeStyle;
+    if (defaultStyle.roughness !== undefined) appState.currentItemRoughness = defaultStyle.roughness;
+    if (defaultStyle.opacity !== undefined) appState.currentItemOpacity = defaultStyle.opacity;
+    if (defaultStyle.fontFamily !== undefined) appState.currentItemFontFamily = defaultStyle.fontFamily;
+    if (defaultStyle.fontSize !== undefined) appState.currentItemFontSize = defaultStyle.fontSize;
+    if (defaultStyle.textAlign) appState.currentItemTextAlign = defaultStyle.textAlign;
+    if ('startArrowhead' in defaultStyle) appState.currentItemStartArrowhead = defaultStyle.startArrowhead ?? null;
+    if ('endArrowhead' in defaultStyle) appState.currentItemEndArrowhead = defaultStyle.endArrowhead ?? null;
+    if ('roundness' in defaultStyle) appState.currentItemRoundness = defaultStyle.roundness;
+  }
+
+  return Object.keys(appState).length > 0 ? appState : undefined;
 }
 
 function blankInitialData(): ExcalidrawInitialData {
@@ -102,15 +276,26 @@ function blankInitialData(): ExcalidrawInitialData {
   };
 }
 
-function normalizeSceneForInitialData(initialScene: string | ExcalidrawInitialData | null | undefined): ExcalidrawInitialData {
+function createBlankInitialData(): NonNullable<ExcalidrawInitialData> {
+  return blankInitialData() ?? { elements: [], appState: { gridSize: 20 }, files: {} };
+}
+
+function normalizeSceneForInitialData(
+  initialScene: string | ExcalidrawInitialData | null | undefined,
+  editorPrefs?: ExcalidrawEditorPrefs,
+): ExcalidrawInitialData {
   if (!initialScene) {
-    return blankInitialData();
+    const blank = createBlankInitialData();
+    return {
+      ...blank,
+      appState: buildInitialAppState(editorPrefs, undefined, blank.appState),
+    };
   }
 
   if (typeof initialScene === 'object') {
     return {
       elements: Array.isArray(initialScene.elements) ? initialScene.elements : [],
-      appState: buildSafeAppState((initialScene as any).appState),
+      appState: buildInitialAppState(editorPrefs, undefined, (initialScene as any).appState),
       files: initialScene.files ?? {},
     };
   }
@@ -119,12 +304,16 @@ function normalizeSceneForInitialData(initialScene: string | ExcalidrawInitialDa
     const parsed = JSON.parse(initialScene);
     return {
       elements: Array.isArray(parsed?.elements) ? parsed.elements : [],
-      appState: buildSafeAppState(parsed?.appState),
+      appState: buildInitialAppState(editorPrefs, undefined, parsed?.appState),
       files: parsed?.files ?? {},
     };
   } catch (error) {
     console.warn('[ExcalidrawBlock] failed to parse scene JSON, fallback to blank scene:', error);
-    return blankInitialData();
+    const blank = createBlankInitialData();
+    return {
+      ...blank,
+      appState: buildInitialAppState(editorPrefs, undefined, blank.appState),
+    };
   }
 }
 
@@ -138,14 +327,9 @@ function getPreferredTheme(): PreferredTheme {
 function withPreferredTheme(
   initialData: ExcalidrawInitialData,
   preferredTheme: PreferredTheme,
+  editorPrefs?: ExcalidrawEditorPrefs,
 ): ExcalidrawInitialData {
-  const appState = initialData?.appState && typeof initialData.appState === 'object'
-    ? { ...(initialData.appState as Record<string, unknown>) }
-    : {};
-
-  if (appState.theme !== 'light' && appState.theme !== 'dark') {
-    appState.theme = preferredTheme;
-  }
+  const appState = buildInitialAppState(editorPrefs, preferredTheme, initialData?.appState) ?? {};
 
   return {
     elements: Array.isArray(initialData?.elements) ? initialData.elements : [],
@@ -155,7 +339,7 @@ function withPreferredTheme(
 }
 
 const ExcalidrawWrapper = (props: ExcalidrawWrapperProps) => {
-  const { initialScene, assetUrl, height, onSceneChange, readOnly } = props;
+  const { initialScene, assetUrl, editorPrefs, sceneMeta, height, onSceneChange, onSceneResolved, readOnly } = props;
   const [isFullscreen, setIsFullscreen] = React.useState(false);
   const [resolvedInitialScene, setResolvedInitialScene] = React.useState<string | ExcalidrawInitialData | null | undefined>(initialScene);
   const [isAssetLoading, setIsAssetLoading] = React.useState(false);
@@ -221,6 +405,9 @@ const ExcalidrawWrapper = (props: ExcalidrawWrapperProps) => {
       .then((sceneText) => {
         if (!cancelled) {
           setResolvedInitialScene(sceneText);
+          if (typeof onSceneResolved === 'function') {
+            onSceneResolved(sceneText);
+          }
         }
       })
       .catch((error) => {
@@ -238,23 +425,31 @@ const ExcalidrawWrapper = (props: ExcalidrawWrapperProps) => {
     return () => {
       cancelled = true;
     };
-  }, [assetUrl, initialScene]);
+  }, [assetUrl, initialScene, onSceneResolved]);
 
   const initialData: ExcalidrawInitialData = React.useMemo(
-    () => normalizeSceneForInitialData(resolvedInitialScene),
-    [resolvedInitialScene],
+    () => normalizeSceneForInitialData(resolvedInitialScene, editorPrefs),
+    [editorPrefs, resolvedInitialScene],
   );
   const themedInitialData: ExcalidrawInitialData = React.useMemo(
-    () => withPreferredTheme(initialData, preferredTheme),
-    [initialData, preferredTheme],
+    () => withPreferredTheme(initialData, preferredTheme, editorPrefs),
+    [editorPrefs, initialData, preferredTheme],
   );
   const [sceneMountVersion, setSceneMountVersion] = React.useState(0);
   const previousResolvedSceneRef = React.useRef<string | ExcalidrawInitialData | null | undefined>(resolvedInitialScene);
 
   const latestSceneRef = React.useRef<ExcalidrawInitialData>(themedInitialData);
+  const lastPersistedContentSignatureRef = React.useRef<string>(computeSceneContentSignature(themedInitialData, sceneMeta));
   React.useEffect(() => {
     latestSceneRef.current = themedInitialData;
   }, [themedInitialData]);
+
+  React.useEffect(() => {
+    const rawScene = typeof resolvedInitialScene === 'string' && resolvedInitialScene.trim()
+      ? parseSceneText(resolvedInitialScene)
+      : resolvedInitialScene;
+    lastPersistedContentSignatureRef.current = computeSceneContentSignature(rawScene, sceneMeta);
+  }, [resolvedInitialScene, sceneMeta]);
 
   React.useEffect(() => {
     if (previousResolvedSceneRef.current === resolvedInitialScene) {
@@ -273,19 +468,26 @@ const ExcalidrawWrapper = (props: ExcalidrawWrapperProps) => {
         files,
       };
 
+      const nextSceneObject = {
+        elements,
+        appState,
+        files,
+      };
+      const nextContentSignature = computeSceneContentSignature(nextSceneObject, sceneMeta);
+      if (nextContentSignature === lastPersistedContentSignatureRef.current) {
+        return;
+      }
+      lastPersistedContentSignatureRef.current = nextContentSignature;
+
       onSceneChange(
         JSON.stringify(
-          {
-            elements,
-            appState,
-            files,
-          },
+          nextSceneObject,
           null,
           2,
         ),
       );
     },
-    [onSceneChange],
+    [onSceneChange, sceneMeta],
   );
 
   const toggleFullscreen = React.useCallback(() => {
@@ -440,27 +642,57 @@ function stableStringify(value: any): string {
   }
 }
 
-function normalizeSceneObject(sceneObj: any): Record<string, unknown> {
+function stripNoisySceneValue(value: any): any {
+  if (value == null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) {
+    return value.map(item => stripNoisySceneValue(item));
+  }
+
+  const out: Record<string, unknown> = {};
+  Object.keys(value).forEach((key) => {
+    if (key === 'updated' || key === 'versionNonce' || key === 'status' || key === 'lastRetrieved' || key === 'baseline') {
+      return;
+    }
+    out[key] = stripNoisySceneValue(value[key]);
+  });
+  return out;
+}
+
+function normalizeSceneObject(sceneObj: any, fallbackMeta?: ExcalidrawSceneMeta): Record<string, unknown> {
   const src = sceneObj && typeof sceneObj === 'object' ? sceneObj : {};
+  const sceneMeta = extractSceneMeta(src, fallbackMeta);
   return {
-    type: src.type != null ? src.type : 'excalidraw',
-    version: src.version != null ? src.version : 2,
-    source: src.source != null ? src.source : 'qnotes',
-    elements: Array.isArray(src.elements) ? src.elements : [],
-    appState: src.appState && typeof src.appState === 'object' ? src.appState : {},
-    files: src.files && typeof src.files === 'object' ? src.files : {},
+    type: sceneMeta.type ?? 'excalidraw',
+    version: sceneMeta.version ?? 2,
+    source: sceneMeta.source ?? 'qnotes',
+    elements: stripNoisySceneValue(Array.isArray(src.elements) ? src.elements : []),
+    files: stripNoisySceneValue(src.files && typeof src.files === 'object' ? src.files : {}),
   };
 }
 
-function buildContentSignatureScene(sceneObj: any): Record<string, unknown> {
-  const normalized = normalizeSceneObject(sceneObj);
+function parseSceneText(sceneText: string): any | null {
+  try {
+    return JSON.parse(sceneText);
+  } catch (_) {
+    return null;
+  }
+}
+
+function deriveScenePersistence(rawScene: any, fallbackMeta?: ExcalidrawSceneMeta, fallbackPrefs?: ExcalidrawEditorPrefs): {
+  assetScene: Record<string, unknown>;
+  sceneMeta: ExcalidrawSceneMeta;
+  editorPrefs?: ExcalidrawEditorPrefs;
+} {
+  const assetScene = normalizeSceneObject(rawScene, fallbackMeta);
   return {
-    type: normalized.type,
-    version: normalized.version,
-    source: normalized.source,
-    elements: normalized.elements,
-    files: normalized.files,
+    assetScene,
+    sceneMeta: extractSceneMeta(assetScene, fallbackMeta),
+    editorPrefs: extractEditorPrefs(rawScene?.appState, fallbackPrefs),
   };
+}
+
+function computeSceneContentSignature(rawScene: any, fallbackMeta?: ExcalidrawSceneMeta): string {
+  return stableStringify(normalizeSceneObject(rawScene, fallbackMeta));
 }
 
 function rightRotate(value: number, amount: number): number {
@@ -569,6 +801,91 @@ function findPreviousBlockByIdOrIndex(app: any, currentBlock: any, index: number
   return prevBlocks[index] || null;
 }
 
+function syncLoadedSceneIntoQNotesBaseline(
+  blockId: string,
+  sceneText: string,
+  fallbackSceneMeta?: ExcalidrawSceneMeta,
+  fallbackEditorPrefs?: ExcalidrawEditorPrefs,
+  fallbackSceneSha256?: string,
+  fallbackAssetUrl?: string,
+): void {
+  const app = getQNotesApp();
+  if (!app || !app.state || !app.state.lastRenderedEditorData || !Array.isArray(app.state.lastRenderedEditorData.blocks)) {
+    return;
+  }
+  if (typeof sceneText !== 'string' || !sceneText.trim()) {
+    return;
+  }
+
+  const blocks = app.state.lastRenderedEditorData.blocks;
+  let targetIndex = -1;
+
+  if (blockId) {
+    targetIndex = blocks.findIndex((item: any) => item && String(item.id || '') === blockId);
+  }
+
+  if (targetIndex < 0 && (fallbackSceneSha256 || fallbackAssetUrl)) {
+    targetIndex = blocks.findIndex((item: any) => {
+      if (!item || item.type !== 'excalidraw') return false;
+      const data = item.data && typeof item.data === 'object' ? item.data : {};
+      const asset = data.asset && typeof data.asset === 'object' ? data.asset : {};
+      const itemSceneSha256 = typeof data.sceneSha256 === 'string' ? data.sceneSha256 : '';
+      const itemAssetSha256 = typeof asset.sha256 === 'string' ? asset.sha256 : '';
+      const itemAssetUrl = typeof asset.url === 'string' ? asset.url : '';
+
+      if (fallbackSceneSha256 && (itemSceneSha256 === fallbackSceneSha256 || itemAssetSha256 === fallbackSceneSha256)) {
+        return true;
+      }
+
+      if (fallbackAssetUrl && itemAssetUrl === fallbackAssetUrl) {
+        return true;
+      }
+
+      return false;
+    });
+  }
+
+  if (targetIndex < 0) {
+    const excalidrawIndexes = blocks
+      .map((item: any, index: number) => ({ item, index }))
+      .filter((entry: { item: any; index: number }) => entry.item && entry.item.type === 'excalidraw');
+    if (excalidrawIndexes.length === 1) {
+      targetIndex = excalidrawIndexes[0].index;
+    }
+  }
+
+  if (targetIndex < 0) {
+    return;
+  }
+
+  const block = blocks[targetIndex];
+  if (!block || block.type !== 'excalidraw') {
+    return;
+  }
+
+  const parsedScene = parseSceneText(sceneText);
+  const persistence = parsedScene
+    ? deriveScenePersistence(parsedScene, fallbackSceneMeta, fallbackEditorPrefs)
+    : {
+        assetScene: undefined,
+        sceneMeta: extractSceneMeta(null, fallbackSceneMeta),
+        editorPrefs: fallbackEditorPrefs,
+      };
+
+  block.data = {
+    ...(block.data && typeof block.data === 'object' ? block.data : {}),
+    scene: sceneText,
+    sceneMeta: persistence.sceneMeta,
+    editorPrefs: persistence.editorPrefs,
+  };
+
+  try {
+    if (app.fn && typeof app.fn.computeEditorDataSignatureForDirty === 'function') {
+      app.state.lastRenderedEditorSignatureForDirty = app.fn.computeEditorDataSignatureForDirty(app.state.lastRenderedEditorData);
+    }
+  } catch (_) {}
+}
+
 async function assetizeExcalidrawBlock(app: any, block: any, index: number): Promise<any> {
   if (!block || block.type !== 'excalidraw') {
     return block;
@@ -588,11 +905,18 @@ async function assetizeExcalidrawBlock(app: any, block: any, index: number): Pro
   const currentAsset = data.asset && typeof data.asset === 'object' ? data.asset : null;
   const previousAsset = previousData.asset && typeof previousData.asset === 'object' ? previousData.asset : null;
   const existingAsset = currentAsset || previousAsset;
+  const fallbackSceneMeta = data.sceneMeta && typeof data.sceneMeta === 'object'
+    ? data.sceneMeta
+    : (previousData.sceneMeta && typeof previousData.sceneMeta === 'object' ? previousData.sceneMeta : undefined);
+  const fallbackEditorPrefs = data.editorPrefs && typeof data.editorPrefs === 'object'
+    ? data.editorPrefs
+    : (previousData.editorPrefs && typeof previousData.editorPrefs === 'object' ? previousData.editorPrefs : undefined);
   const existingSha = typeof data.sceneSha256 === 'string' && data.sceneSha256
     ? data.sceneSha256
     : (existingAsset && typeof existingAsset.sha256 === 'string' ? existingAsset.sha256 : '');
 
   if (!sceneText) {
+    const persistedSceneMeta = extractSceneMeta(null, fallbackSceneMeta);
     if (existingAsset && typeof existingAsset.url === 'string' && existingAsset.url) {
       return {
         ...block,
@@ -601,22 +925,22 @@ async function assetizeExcalidrawBlock(app: any, block: any, index: number): Pro
           scene: '',
           sceneSha256: existingSha || '',
           asset: existingAsset,
+          sceneMeta: persistedSceneMeta,
+          editorPrefs: fallbackEditorPrefs,
         },
       };
     }
     return block;
   }
 
-  let parsedScene: any;
-  try {
-    parsedScene = JSON.parse(sceneText);
-  } catch (_) {
+  const parsedScene = parseSceneText(sceneText);
+  if (!parsedScene) {
     return block;
   }
 
-  const normalizedScene = normalizeSceneObject(parsedScene);
-  const sceneFileText = `${stableStringify(normalizedScene)}\n`;
-  const sceneContentSignature = stableStringify(buildContentSignatureScene(normalizedScene));
+  const persistence = deriveScenePersistence(parsedScene, fallbackSceneMeta, fallbackEditorPrefs);
+  const sceneFileText = `${stableStringify(persistence.assetScene)}\n`;
+  const sceneContentSignature = stableStringify(persistence.assetScene);
   const sha256 = await sha256Hex(sceneContentSignature);
 
   if (existingAsset && typeof existingAsset.url === 'string' && existingAsset.url && existingSha === sha256) {
@@ -627,6 +951,8 @@ async function assetizeExcalidrawBlock(app: any, block: any, index: number): Pro
         scene: '',
         sceneSha256: sha256,
         asset: existingAsset,
+        sceneMeta: persistence.sceneMeta,
+        editorPrefs: persistence.editorPrefs,
       },
     };
   }
@@ -651,6 +977,8 @@ async function assetizeExcalidrawBlock(app: any, block: any, index: number): Pro
         mime: 'application/json',
         sha256,
       },
+      sceneMeta: persistence.sceneMeta,
+      editorPrefs: persistence.editorPrefs,
     },
   };
 }
@@ -724,6 +1052,8 @@ export default class ExcalidrawBlock implements BlockTool {
       link: data?.link ?? '',
       asset: data?.asset,
       sceneSha256: data?.sceneSha256,
+      sceneMeta: data?.sceneMeta,
+      editorPrefs: data?.editorPrefs,
     };
 
     this.height = Number.isFinite(config?.height as number) ? (config!.height as number) : 960;
@@ -761,14 +1091,29 @@ export default class ExcalidrawBlock implements BlockTool {
     const onSceneChange = (scene: string) => {
       this.data.scene = scene;
     };
+    const onSceneResolved = (scene: string) => {
+      this.data.scene = scene;
+      const blockId = this.block && (this.block as any).id ? String((this.block as any).id) : '';
+      syncLoadedSceneIntoQNotesBaseline(
+        blockId,
+        scene,
+        this.data.sceneMeta,
+        this.data.editorPrefs,
+        this.data.sceneSha256,
+        this.data.asset?.url,
+      );
+    };
 
     this.reactRoot = createRoot(canvasHost);
     this.reactRoot.render(
       React.createElement(ExcalidrawWrapper, {
         initialScene: this.data.scene,
         assetUrl: this.data.asset?.url,
+        editorPrefs: this.data.editorPrefs,
+        sceneMeta: this.data.sceneMeta,
         height: this.height,
         onSceneChange,
+        onSceneResolved,
         readOnly: this.readOnly,
       }),
     );
@@ -777,11 +1122,24 @@ export default class ExcalidrawBlock implements BlockTool {
   }
 
   public save(): ExcalidrawData {
+    const parsedScene = typeof this.data.scene === 'string' && this.data.scene.trim()
+      ? parseSceneText(this.data.scene)
+      : null;
+    const persistence = parsedScene
+      ? deriveScenePersistence(parsedScene, this.data.sceneMeta, this.data.editorPrefs)
+      : {
+          assetScene: undefined,
+          sceneMeta: extractSceneMeta(null, this.data.sceneMeta),
+          editorPrefs: this.data.editorPrefs,
+        };
+
     return {
       scene: this.data.scene ?? '',
       link: this.data.link,
       asset: this.data.asset,
       sceneSha256: this.data.sceneSha256,
+      sceneMeta: persistence.sceneMeta,
+      editorPrefs: persistence.editorPrefs,
     };
   }
 
@@ -795,6 +1153,8 @@ export default class ExcalidrawBlock implements BlockTool {
       },
       asset: false,
       sceneSha256: false,
+      sceneMeta: false,
+      editorPrefs: false,
     } as unknown as SanitizerConfig;
   }
 
@@ -812,6 +1172,10 @@ export default class ExcalidrawBlock implements BlockTool {
     }
 
     if ((data as any).asset && typeof (data as any).asset.url === 'string') {
+      return true;
+    }
+
+    if ((data as any).sceneMeta && typeof (data as any).sceneMeta === 'object') {
       return true;
     }
 
